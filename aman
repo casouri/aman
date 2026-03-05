@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ccman - Container-based Claude/Gemini manager using Colima"""
+"""aman - Container-based Claude/Gemini manager using Colima"""
 
 import argparse
 import hashlib
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # Constants
-SRC_DIR = Path.home() / "p" / "ccman"
+SRC_DIR = Path.home() / "p" / "aman"
 COLIMA_CONFIG_DIR = Path.home() / ".colima"
 
 
@@ -43,10 +43,10 @@ PROVIDERS = {
 
 
 def get_profile_name(project_dir: Path) -> str:
-    """Generate short profile name: cc-<dirname>-<6char-hash>"""
+    """Generate short profile name: am-<dirname>-<6char-hash>"""
     dirname = project_dir.name
     hash_val = hashlib.md5(str(project_dir).encode()).hexdigest()[:6]
-    return f"cc-{dirname}-{hash_val}"
+    return f"am-{dirname}-{hash_val}"
 
 
 def run_cmd(
@@ -210,13 +210,13 @@ def cmd_stop(project_dir: Path) -> None:
 
 
 def cmd_list() -> None:
-    """List all ccman instances."""
+    """List all aman instances."""
     print(f"{'PROFILE':<25} {'PROJECT':<45} STATUS")
 
     result = run_cmd(["colima", "list"], capture=True)
     for line in result.stdout.strip().split("\n"):
         parts = line.split()
-        if not parts or not parts[0].startswith("cc-"):
+        if not parts or not parts[0].startswith("am-"):
             continue
 
         profile = parts[0]
@@ -285,7 +285,7 @@ def cmd_clean_image(project_dir: Path) -> None:
 def main() -> None:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
-        prog="ccman",
+        prog="aman",
         description="Container-based Claude/Gemini manager using Colima",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -311,7 +311,7 @@ def main() -> None:
     p_stop.set_defaults(func=lambda args: cmd_stop(args.project_dir))
 
     # list command
-    p_list = subparsers.add_parser("list", help="List all ccman instances")
+    p_list = subparsers.add_parser("list", help="List all aman instances")
     p_list.set_defaults(func=lambda _: cmd_list())
 
     # clean command

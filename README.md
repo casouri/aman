@@ -1,4 +1,4 @@
-# ccman
+# aman
 
 Note: this whole thing is vide coded and unchecked, don’t use it.
 
@@ -7,11 +7,11 @@ A CLI tool to run Claude Code in isolated Docker containers via Colima, one VM p
 ## Setup
 
 - Copy configs into `var/.claude.json` and `var/.claude/settings.json`.
-- Fix the `SRC_DIR` in `ccman`.
+- Fix the `SRC_DIR` in `aman`.
 
 ## Files
 
-- `ccman` — the CLI script (bash)
+- `aman` — the CLI script (bash)
 - `Dockerfile` — Docker image definition for Claude Code
 - `var/` — shared Claude state directory
   - `.claude.json` — Claude settings (mapped to `~/.claude.json` in container)
@@ -37,19 +37,19 @@ This means all Claude sessions across all containers share settings, history, an
 The path translation (`$HOME/` → `/home/`) ensures consistent Linux paths in
 Claude's project-specific state stored in `~/.claude/`.
 
-Profile naming: `cc-<path>` where `<path>` is the absolute project path with `/`
+Profile naming: `am-<path>` where `<path>` is the absolute project path with `/`
 replaced by `-` and the leading `/` stripped. Example:
-`/Users/yuan/projects/foo` → `cc-Users-yuan-projects-foo`
+`/Users/yuan/projects/foo` → `am-Users-yuan-projects-foo`
 
 The Docker image (`claude-code`) is built once per Colima profile and reused on
 subsequent runs.
 
 ## Commands
 ```
-ccman start [project-dir]        # Start Claude Code for a project (default: cwd)
-ccman list                       # List all ccman Colima instances
-ccman clean [project-dir]        # Remove colima and docker instance for a project
-ccman clean-image [project-dir]  # Remove the claude-code docker image for a project
+aman start [project-dir]        # Start Claude Code for a project (default: cwd)
+aman list                       # List all aman Colima instances
+aman clean [project-dir]        # Remove colima and docker instance for a project
+aman clean-image [project-dir]  # Remove the claude-code docker image for a project
 ```
 
 ## Dependencies
@@ -75,22 +75,22 @@ ccman clean-image [project-dir]  # Remove the claude-code docker image for a pro
 
 4. Install the script:
 ```bash
-   cp ccman /usr/local/bin/ccman
-   chmod +x /usr/local/bin/ccman
+   cp aman /usr/local/bin/aman
+   chmod +x /usr/local/bin/aman
 ```
 
 or use a soft link:
 
 ```bash
-ln -s "$(pwd)/ccman" /usr/local/bin/ccman
+ln -s "$(pwd)/aman" /usr/local/bin/aman
 ```
 
-## Key Constants (in `ccman`)
+## Key Constants (in `aman`)
 
 | Variable         | Value                        | Purpose                            |
 |------------------|------------------------------|------------------------------------|
 | `SRC_DIR`        | `$HOME/p/claudecode`         | Location of the Dockerfile & script|
-| Profile prefix   | `cc-`                        | Identifies ccman-managed profiles|
+| Profile prefix   | `am-`                        | Identifies aman-managed profiles|
 | Colima CPU       | 1                            | vCPUs per VM                     |
 | Colima memory    | 1                            | GB RAM per VM                    |
 | Mount type       | `virtiofs`                   | Fast file sync (requires macOS 12+)|
@@ -98,11 +98,11 @@ ln -s "$(pwd)/ccman" /usr/local/bin/ccman
 ## Known Limitations
 
 - Path-to-profile-name conversion replaces both `/` and `-` with `-`, so paths
-  containing dashes are ambiguous when reversing (e.g. in `ccman list`). If this
+  containing dashes are ambiguous when reversing (e.g. in `aman list`). If this
   is a problem, consider storing a path→profile map in `~/.config/claude-code/`.
 - Images are not shared across Colima profiles. Each VM builds its own `claude-code`
   image on first run.
-- `ccman list` only shows the Colima status columns; it does not show running Docker
+- `aman list` only shows the Colima status columns; it does not show running Docker
   containers within each VM.
 - `--mount-type virtiofs` requires macOS 12+.
 
