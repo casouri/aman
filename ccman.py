@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+"""ccman - Container-based Claude/Gemini manager using Colima"""
+
+import argparse
+import hashlib
+import os
+import re
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+# Constants
+SRC_DIR = Path.home() / "p" / "ccman"
+COLIMA_CONFIG_DIR = Path.home() / ".colima"
+
+
+@dataclass
+class Provider:
+    name: str
+    api_key_name: str
+    exec_args: list[str]
+
+
+PROVIDERS = {
+    "claude": Provider(
+        "claude",
+        "anthropic-api-key",
+        ["claude", "--dangerously-skip-permissions"],
+    ),
+    "gemini": Provider(
+        "gemini",
+        "gemini-api-key",
+        ["gemini", "--approval-mode=yolo"],
+    ),
+    "copilot": Provider(
+        "copilot",
+        "",  # No API key needed, uses GitHub CLI auth
+        ["copilot", "--autopilot", "--yolo"],
+    ),
+}
+
+
+def get_profile_name(project_dir: Path) -> str:
+    """Generate short profile name: cc-<dirname>-<6char-hash>"""
+    dirname = project_dir.name
+    hash_val = hashlib.md5(str(project_dir).encode()).hexdigest()[:6]
+    return f"cc-{dirname}-{hash_val}"
+
+
+def run_cmd(
+    args: list[str],
+    capture: bool = False,
+    check: bool = False,
+    quiet: bool = False,
+) -> subprocess.CompletedProcess:
+    """Run a subprocess command."""
+    kwargs: dict = {}
+    if capture:
+        kwargs["capture_output"] = True
+        kwargs["text"] = True
+    if quiet:
+        kwargs["stdout"] = subprocess.DEVNULL
+        kwargs["stderr"] = subprocess.DEVNULL
+    return subprocess.run(args, check=check, **kwargs)
+
+
+def docker_cmd(profile: str, *args: str) -> list[str]:
+    """Build docker command with context."""
+    return ["docker", "--context", f"colima-{profile}", *args]
+
+
+def get_api_key(key_name: str) -> str:
+    """Get API key from macOS keychain."""
+    result = run_cmd(
+        ["security", "find-generic-password", "-s", key_name, "-w"],
+        capture=True,
+    )
+    if result.returncode != 0:
+        print(f"API key not found in keychain. Add it with:")
+        print(f"  security add-generic-password -s {key_name} -a $USER -w")
+        sys.exit(1)
+    return result.stdout.strip()
+
+
+def is_colima_running(profile: str) -> bool:
+    """Check if colima profile is running."""
+    result = run_cmd(["colima", "status", profile], quiet=True)
+    return result.returncode == 0
+
+
+def get_project_path_from_config(profile: str) -> str:
+    """Get project path from colima config file."""
+    config_file = COLIMA_CONFIG_DIR / profile / "colima.yaml"
+    if config_file.exists():
+        content = config_file.read_text()
+        # Find first mount location after "mounts:"
+        match = re.search(r"mounts:\s*\n\s*-\s*location:\s*(.+)", content)
+        if match:
+            return match.group(1).strip()
+    return "(unknown)"
+
+
+def cmd_run(provider_name: str, project_dir: Path) -> None:
+    """Start claude/gemini in a containerized colima VM."""
+    provider = PROVIDERS.get(provider_name)
+    if not provider:
+        print(f"Unknown provider: {provider_name}")
+        sys.exit(1)
+
+    project_dir = project_dir.resolve()
+    container_dir = str(project_dir).replace(str(Path.home()), "/home", 1)
+    profile = get_profile_name(project_dir)
+
+    print(f"Project:  {project_dir}")
+    print(f"Profile:  {profile}")
+
+    # Get API key (if required)
+    api_key = get_api_key(provider.api_key_name) if provider.api_key_name else ""
+
+    # Start Colima profile if not running
+    if not is_colima_running(profile):
+        print(f"Starting Colima profile '{profile}'...")
+        run_cmd(
+            [
+                "colima", "start", profile,
+                "--activate=false",
+                "--cpu", "1",
+                "--memory", "1",
+                "--disk", "20",
+                "--mount", f"{project_dir}:w",
+                "--mount", f"{SRC_DIR / 'var'}:w",
+                "--mount-type", "virtiofs",
+            ],
+            check=True,
+        )
+
+        # Wait for Docker daemon
+        print("Waiting for Docker daemon...")
+        for _ in range(30):
+            result = run_cmd(docker_cmd(profile, "info"), quiet=True)
+            if result.returncode == 0:
+                break
+            time.sleep(1)
+    else:
+        print(f"Colima profile '{profile}' already running.")
+
+    # Build image if needed
+    result = run_cmd(docker_cmd(profile, "images", "-q", "agent-image"), capture=True)
+    if not result.stdout.strip():
+        print("Building agent-image...")
+        run_cmd(docker_cmd(profile, "build", "-t", "agent-image", str(SRC_DIR)), check=True)
+    else:
+        print("Image already exists, skipping build.")
+
+    # Check for existing container (running OR stopped)
+    result = run_cmd(
+        docker_cmd(profile, "ps", "-aq", "--filter", "ancestor=agent-image"),
+        capture=True,
+    )
+    existing = result.stdout.strip().split("\n")[0] if result.stdout.strip() else ""
+
+    if existing:
+        # Check if container is running
+        result = run_cmd(
+            docker_cmd(profile, "ps", "-q", "--filter", f"id={existing}"),
+            capture=True,
+        )
+        if result.stdout.strip():
+            print("Attaching to running container...")
+        else:
+            print("Starting stopped container...")
+            run_cmd(docker_cmd(profile, "start", existing), check=True)
+
+        # Exec into container (replaces current process)
+        cmd = docker_cmd(profile, "exec", "-it", existing, *provider.exec_args)
+        os.execvp(cmd[0], cmd)
+    else:
+        print("Starting new container...")
+        cmd = docker_cmd(
+            profile, "run", "-it",
+            "-v", f"{project_dir}:{container_dir}",
+            "-v", f"{SRC_DIR / 'var' / '.claude'}:/home/bob/.claude",
+            "-v", f"{SRC_DIR / 'var' / '.gemini'}:/home/bob/.gemini",
+            "-v", f"{SRC_DIR / 'var' / '.claude.json'}:/home/bob/.claude.json",
+            "-e", f"API_KEY={api_key}",
+            "-e", f"GEMINI_API_KEY={api_key}",
+            "-w", container_dir,
+            "agent-image",
+            *provider.exec_args,
+        )
+        os.execvp(cmd[0], cmd)
+
+
+def cmd_stop(project_dir: Path) -> None:
+    """Stop the colima instance for a project."""
+    project_dir = project_dir.resolve()
+    profile = get_profile_name(project_dir)
+
+    print(f"Project:  {project_dir}")
+    print(f"Profile:  {profile}")
+
+    if is_colima_running(profile):
+        print(f"Stopping colima profile '{profile}'...")
+        run_cmd(["colima", "stop", profile], check=True)
+        print("Stopped.")
+    else:
+        print(f"Colima profile '{profile}' is not running.")
+
+
+def cmd_list() -> None:
+    """List all ccman instances."""
+    print(f"{'PROFILE':<25} {'PROJECT':<45} STATUS")
+
+    result = run_cmd(["colima", "list"], capture=True)
+    for line in result.stdout.strip().split("\n"):
+        parts = line.split()
+        if not parts or not parts[0].startswith("cc-"):
+            continue
+
+        profile = parts[0]
+        status = parts[1] if len(parts) > 1 else ""
+        path = get_project_path_from_config(profile)
+
+        print(f"{profile:<25} {path:<45} {status}")
+
+
+def cmd_clean(project_dir: Path) -> None:
+    """Remove containers, images, and colima instance."""
+    project_dir = project_dir.resolve()
+    profile = get_profile_name(project_dir)
+
+    print(f"Project:  {project_dir}")
+    print(f"Profile:  {profile}")
+
+    # Check if profile exists
+    result = run_cmd(["colima", "list"], capture=True)
+    if profile not in result.stdout:
+        print(f"No colima instance found for profile '{profile}'.")
+
+    # Remove all docker containers
+    result = run_cmd(docker_cmd(profile, "ps", "-aq"), capture=True)
+    containers = result.stdout.strip()
+    if containers:
+        print("Removing docker containers...")
+        run_cmd(docker_cmd(profile, "rm", "-f", *containers.split()))
+
+    # Remove all docker images
+    result = run_cmd(docker_cmd(profile, "images", "-q"), capture=True)
+    images = result.stdout.strip()
+    if images:
+        print("Removing docker images...")
+        run_cmd(docker_cmd(profile, "rmi", "-f", *images.split()))
+
+    # Stop and delete colima profile
+    print(f"Stopping and deleting colima profile '{profile}'...")
+    run_cmd(["colima", "stop", profile], quiet=True)
+    run_cmd(["colima", "delete", profile, "-f"])
+
+    print(f"Cleaned up profile '{profile}'.")
+
+
+def cmd_clean_image(project_dir: Path) -> None:
+    """Remove the docker image only."""
+    project_dir = project_dir.resolve()
+    profile = get_profile_name(project_dir)
+
+    print(f"Project:  {project_dir}")
+    print(f"Profile:  {profile}")
+
+    if not is_colima_running(profile):
+        print(f"Colima profile '{profile}' is not running.")
+
+    # Check if image exists
+    result = run_cmd(docker_cmd(profile, "images", "-q", "agent-image"), capture=True)
+    if result.stdout.strip():
+        print("Removing agent-image image...")
+        run_cmd(docker_cmd(profile, "rmi", "-f", "agent-image"))
+        print("Image removed.")
+    else:
+        print("No agent-image image found.")
+
+
+def main() -> None:
+    """CLI entry point."""
+    parser = argparse.ArgumentParser(
+        prog="ccman",
+        description="Container-based Claude/Gemini manager using Colima",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # claude command
+    p_claude = subparsers.add_parser("claude", help="Start Claude Code for a project")
+    p_claude.add_argument("project_dir", nargs="?", type=Path, default=Path.cwd())
+    p_claude.set_defaults(func=lambda args: cmd_run("claude", args.project_dir))
+
+    # gemini command
+    p_gemini = subparsers.add_parser("gemini", help="Start Gemini for a project")
+    p_gemini.add_argument("project_dir", nargs="?", type=Path, default=Path.cwd())
+    p_gemini.set_defaults(func=lambda args: cmd_run("gemini", args.project_dir))
+
+    # copilot command
+    p_copilot = subparsers.add_parser("copilot", help="Start Copilot for a project")
+    p_copilot.add_argument("project_dir", nargs="?", type=Path, default=Path.cwd())
+    p_copilot.set_defaults(func=lambda args: cmd_run("copilot", args.project_dir))
+
+    # stop command
+    p_stop = subparsers.add_parser("stop", help="Stop the colima instance for a project")
+    p_stop.add_argument("project_dir", nargs="?", type=Path, default=Path.cwd())
+    p_stop.set_defaults(func=lambda args: cmd_stop(args.project_dir))
+
+    # list command
+    p_list = subparsers.add_parser("list", help="List all ccman instances")
+    p_list.set_defaults(func=lambda _: cmd_list())
+
+    # clean command
+    p_clean = subparsers.add_parser("clean", help="Remove containers, images, and colima instance")
+    p_clean.add_argument("project_dir", nargs="?", type=Path, default=Path.cwd())
+    p_clean.set_defaults(func=lambda args: cmd_clean(args.project_dir))
+
+    # clean-image command
+    p_clean_image = subparsers.add_parser("clean-image", help="Remove the docker image")
+    p_clean_image.add_argument("project_dir", nargs="?", type=Path, default=Path.cwd())
+    p_clean_image.set_defaults(func=lambda args: cmd_clean_image(args.project_dir))
+
+    args = parser.parse_args()
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()
