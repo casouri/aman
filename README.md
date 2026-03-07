@@ -6,8 +6,11 @@ A CLI tool to run Claude Code in isolated Docker containers via Colima, one VM p
 
 ## Setup
 
-- Copy configs into `var/.claude.json` and `var/.claude/settings.json`.
-- Fix the `SRC_DIR` in `aman`.
+- Run setup.sh to install `colima` and `docker`, and copy agent configs into `var`:
+  - `~/.claude.json`
+  - `~/.claude/*~`
+  - `~/.copilot/*`
+  - `~/.gemini/*`
 
 ## Files
 
