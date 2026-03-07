@@ -1,4 +1,2 @@
-var/.claude/
-var/.claude.json
-var/.copilot/
-var/.gemini/
+var/*
+var
