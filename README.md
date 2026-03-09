@@ -68,28 +68,25 @@ aman clean-image [project-dir]  # Remove the claude-code docker image for a proj
    brew install colima docker
 ```
 
-2. Update `SRC_DIR` to point to `Dockerfile`
-
-3. Install the script:
+2. Install the script:
 ```bash
-   cp aman /usr/local/bin/aman
-   chmod +x /usr/local/bin/aman
+   cp aman ~/bin/aman
+   chmod +x ~/bin/aman
 ```
 
 or use a soft link:
 
 ```bash
-ln -s "$(pwd)/aman" /usr/local/bin/aman
+ln -s "$(pwd)/aman" ~/bin/aman
 ```
 
 ## Key Constants (in `aman`)
 
 | Variable         | Value                        | Purpose                            |
 |------------------|------------------------------|------------------------------------|
-| `SRC_DIR`        | `$HOME/p/claudecode`         | Location of the Dockerfile & script|
-| Profile prefix   | `am-`                        | Identifies aman-managed profiles|
-| Colima CPU       | 1                            | vCPUs per VM                     |
-| Colima memory    | 1                            | GB RAM per VM                    |
+| Profile prefix   | `am-`                        | Identifies aman-managed profiles   |
+| Colima CPU       | 1                            | vCPUs per VM                       |
+| Colima memory    | 1                            | GB RAM per VM                      |
 | Mount type       | `virtiofs`                   | Fast file sync (requires macOS 12+)|
 
 ## Known Limitations
@@ -99,8 +96,6 @@ ln -s "$(pwd)/aman" /usr/local/bin/aman
   is a problem, consider storing a path→profile map in `~/.config/claude-code/`.
 - Images are not shared across Colima profiles. Each VM builds its own `claude-code`
   image on first run.
-- `aman list` only shows the Colima status columns; it does not show running Docker
-  containers within each VM.
 - `--mount-type virtiofs` requires macOS 12+.
 
 ## Security Model
