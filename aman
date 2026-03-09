@@ -3,17 +3,25 @@
 
 import argparse
 import hashlib
+import json
 import os
-import re
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypedDict
 
 # Constants
-SRC_DIR = Path.home() / "p" / "aman"
-COLIMA_CONFIG_DIR = Path.home() / ".colima"
+SRC_DIR = Path(__file__).resolve().parent
+DB_PATH = SRC_DIR / "var" / "profiles.json"
+
+
+class ProfileEntry(TypedDict):
+    project_dir: str  # Absolute path to project directory
+
+
+ProfileDB = dict[str, ProfileEntry]  # profile_name -> ProfileEntry
 
 
 @dataclass
@@ -64,16 +72,38 @@ def is_colima_running(profile: str) -> bool:
     return result.returncode == 0
 
 
-def get_project_path_from_config(profile: str) -> str:
-    """Get project path from colima config file."""
-    config_file = COLIMA_CONFIG_DIR / profile / "colima.yaml"
-    if config_file.exists():
-        content = config_file.read_text()
-        # Find first mount location after "mounts:"
-        match = re.search(r"mounts:\s*\n\s*-\s*location:\s*(.+)", content)
-        if match:
-            return match.group(1).strip()
-    return "(unknown)"
+def load_profiles() -> ProfileDB:
+    """Load profiles database, return empty dict if not exists."""
+    if DB_PATH.exists():
+        return json.loads(DB_PATH.read_text())
+    return {}
+
+
+def save_profiles(db: ProfileDB) -> None:
+    """Save profiles database."""
+    DB_PATH.write_text(json.dumps(db, indent=2))
+
+
+def register_profile(profile: str, project_dir: Path) -> None:
+    """Register a profile with its project directory."""
+    db = load_profiles()
+    db[profile] = {"project_dir": str(project_dir)}
+    save_profiles(db)
+
+
+def unregister_profile(profile: str) -> None:
+    """Remove a profile from the database."""
+    db = load_profiles()
+    if profile in db:
+        del db[profile]
+        save_profiles(db)
+
+
+def get_project_dir(profile: str) -> str:
+    """Get project directory for a profile."""
+    db = load_profiles()
+    entry = db.get(profile)
+    return entry["project_dir"] if entry else "(unknown)"
 
 
 def cmd_run(provider_name: str, project_dir: Path) -> None:
@@ -86,6 +116,9 @@ def cmd_run(provider_name: str, project_dir: Path) -> None:
     project_dir = project_dir.resolve()
     container_dir = str(project_dir).replace(str(Path.home()), "/home", 1)
     profile = get_profile_name(project_dir)
+
+    # Register profile in database
+    register_profile(profile, project_dir)
 
     print(f"Project:  {project_dir}")
     print(f"Profile:  {profile}")
@@ -190,7 +223,7 @@ def cmd_list() -> None:
 
         profile = parts[0]
         status = parts[1] if len(parts) > 1 else ""
-        path = get_project_path_from_config(profile)
+        path = get_project_dir(profile)
 
         print(f"{profile:<25} {path:<45} {status}")
 
@@ -226,6 +259,9 @@ def cmd_clean(project_dir: Path) -> None:
     print(f"Stopping and deleting colima profile '{profile}'...")
     run_cmd(["colima", "stop", profile], quiet=True)
     run_cmd(["colima", "delete", profile, "-f"])
+
+    # Remove from profiles database
+    unregister_profile(profile)
 
     print(f"Cleaned up profile '{profile}'.")
 
