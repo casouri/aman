@@ -19,26 +19,13 @@ COLIMA_CONFIG_DIR = Path.home() / ".colima"
 @dataclass
 class Provider:
     name: str
-    api_key_name: str
     exec_args: list[str]
 
 
 PROVIDERS = {
-    "claude": Provider(
-        "claude",
-        "anthropic-api-key",
-        ["claude", "--dangerously-skip-permissions"],
-    ),
-    "gemini": Provider(
-        "gemini",
-        "gemini-api-key",
-        ["gemini", "--approval-mode=yolo"],
-    ),
-    "copilot": Provider(
-        "copilot",
-        "",  # No API key needed, uses GitHub CLI auth
-        ["copilot", "--autopilot", "--yolo"],
-    ),
+    "claude": Provider("claude", ["claude", "--dangerously-skip-permissions"]),
+    "gemini": Provider("gemini", ["gemini", "--approval-mode=yolo"]),
+    "copilot": Provider("copilot", ["copilot", "--autopilot", "--yolo"]),
 }
 
 
@@ -69,19 +56,6 @@ def run_cmd(
 def docker_cmd(profile: str, *args: str) -> list[str]:
     """Build docker command with context."""
     return ["docker", "--context", f"colima-{profile}", *args]
-
-
-def get_api_key(key_name: str) -> str:
-    """Get API key from macOS keychain."""
-    result = run_cmd(
-        ["security", "find-generic-password", "-s", key_name, "-w"],
-        capture=True,
-    )
-    if result.returncode != 0:
-        print(f"API key not found in keychain. Add it with:")
-        print(f"  security add-generic-password -s {key_name} -a $USER -w")
-        sys.exit(1)
-    return result.stdout.strip()
 
 
 def is_colima_running(profile: str) -> bool:
@@ -115,9 +89,6 @@ def cmd_run(provider_name: str, project_dir: Path) -> None:
 
     print(f"Project:  {project_dir}")
     print(f"Profile:  {profile}")
-
-    # Get API key (if required)
-    api_key = get_api_key(provider.api_key_name) if provider.api_key_name else ""
 
     # Start Colima profile if not running
     if not is_colima_running(profile):
@@ -184,8 +155,6 @@ def cmd_run(provider_name: str, project_dir: Path) -> None:
             "-v", f"{SRC_DIR / 'var' / '.claude'}:/home/bob/.claude",
             "-v", f"{SRC_DIR / 'var' / '.gemini'}:/home/bob/.gemini",
             "-v", f"{SRC_DIR / 'var' / '.claude.json'}:/home/bob/.claude.json",
-            "-e", f"API_KEY={api_key}",
-            "-e", f"GEMINI_API_KEY={api_key}",
             "-w", container_dir,
             "agent-image",
             *provider.exec_args,

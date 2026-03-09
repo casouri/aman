@@ -60,7 +60,6 @@ aman clean-image [project-dir]  # Remove the claude-code docker image for a proj
 - `colima` — container runtime / VM manager
 - `docker` — CLI only, no Docker Desktop
 - `node:22-slim` base image
-- macOS keychain entry for the Anthropic API key
 
 ## Setup
 
@@ -71,12 +70,7 @@ aman clean-image [project-dir]  # Remove the claude-code docker image for a proj
 
 2. Update `SRC_DIR` to point to `Dockerfile`
 
-3. Add the Anthropic API key to the macOS keychain:
-```bash
-   security add-generic-password -s "anthropic-api-key" -a "$USER" -w
-```
-
-4. Install the script:
+3. Install the script:
 ```bash
    cp aman /usr/local/bin/aman
    chmod +x /usr/local/bin/aman
@@ -112,8 +106,6 @@ ln -s "$(pwd)/aman" /usr/local/bin/aman
 ## Security Model
 
 - The Colima VM only mounts the project directory — not the home directory.
-- The Anthropic API key is retrieved from the macOS keychain at runtime and passed
-  as an environment variable into the container.
 - Claude Code runs with `--dangerously-skip-permissions` (yolo mode). Use git so
   you can roll back changes.
 - The container has outbound network access (required for the Anthropic API). It is
