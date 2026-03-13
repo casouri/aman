@@ -19,6 +19,7 @@ A CLI tool to run Claude Code in isolated Docker containers via Colima, one VM p
 - `var/` — shared Claude state directory
   - `.claude.json` — Claude settings (mapped to `~/.claude.json` in container)
   - `.claude/` — Claude data directory (mapped to `~/.claude/` in container)
+  - `agent-image.tar` — shared exported Docker image archive
 
 ## Architecture
 
@@ -44,14 +45,19 @@ Profile naming: `am-<path>` where `<path>` is the absolute project path with `/`
 replaced by `-` and the leading `/` stripped. Example:
 `/Users/yuan/projects/foo` → `am-Users-yuan-projects-foo`
 
-The Docker image (`agent-image`) is built once reused on all runs. Each run starts a new container.
+Each project still gets its own Colima profile for filesystem isolation.
+
+The Docker image (`agent-image`) is stored as a shared archive in `var/`.
+If `var/agent-image.tar` does not exist, `aman` builds it and stores it there.
+Before each container run, `aman` reloads that archive into the active Colima profile.
+Each CLI session still starts a fresh disposable container.
 
 ## Commands
 ```
 aman start [project-dir]        # Start Claude Code for a project (default: cwd)
 aman list                       # List all aman Colima instances
 aman clean [project-dir]        # Remove colima and docker instance for a project
-aman clean-image [project-dir]  # Remove the claude-code docker image for a project
+aman clean-image [project-dir]  # Remove the shared image archive
 ```
 
 ## Dependencies
@@ -93,8 +99,8 @@ ln -s "$(pwd)/aman" ~/bin/aman
 - Path-to-profile-name conversion replaces both `/` and `-` with `-`, so paths
   containing dashes are ambiguous when reversing (e.g. in `aman list`). If this
   is a problem, consider storing a path→profile map in `~/.config/claude-code/`.
-- Images are not shared across Colima profiles. Each VM builds its own `claude-code`
-  image on first run.
+- If you change the Docker image inputs, remove `var/agent-image.tar` or run
+  `aman clean-image` so the shared archive is rebuilt on the next run.
 - `--mount-type virtiofs` requires macOS 12+.
 
 ## Security Model

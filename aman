@@ -2,7 +2,6 @@
 """aman - Container-based Claude/Gemini manager using Colima"""
 
 import argparse
-import hashlib
 import json
 import os
 import subprocess
@@ -15,6 +14,8 @@ from typing import TypedDict
 # Constants
 SRC_DIR = Path(__file__).resolve().parent
 DB_PATH = SRC_DIR / "var" / "profiles.json"
+IMAGE_NAME = "agent-image"
+SHARED_IMAGE_ARCHIVE = SRC_DIR / "var" / f"{IMAGE_NAME}.tar"
 
 
 class ProfileEntry(TypedDict):
@@ -106,6 +107,44 @@ def get_project_dir(profile: str) -> str:
     return entry["project_dir"] if entry else "(unknown)"
 
 
+def get_image_id(profile: str) -> str | None:
+    """Get the full image ID for the local image in a profile."""
+    result = run_cmd(
+        docker_cmd(profile, "image", "inspect", "--format", "{{.Id}}", IMAGE_NAME),
+        capture=True,
+    )
+    image_id = result.stdout.strip()
+    return image_id or None
+
+
+def ensure_shared_image_archive(profile: str) -> None:
+    """Ensure the shared image archive under var/ exists."""
+    if SHARED_IMAGE_ARCHIVE.exists():
+        print("Shared image archive already exists.")
+        return
+
+    print("Building shared agent-image archive...")
+    run_cmd(docker_cmd(profile, "build", "-t", IMAGE_NAME, str(SRC_DIR)), check=True)
+
+    SHARED_IMAGE_ARCHIVE.parent.mkdir(parents=True, exist_ok=True)
+    print(f"Exporting shared image archive to {SHARED_IMAGE_ARCHIVE}...")
+    run_cmd(
+        docker_cmd(profile, "save", "-o", str(SHARED_IMAGE_ARCHIVE), IMAGE_NAME),
+        check=True,
+    )
+
+
+def ensure_profile_image(profile: str) -> None:
+    """Reload the shared image into the current profile before each run."""
+    print("Loading shared image into current profile...")
+    run_cmd(
+        docker_cmd(profile, "load", "-i", str(SHARED_IMAGE_ARCHIVE)),
+        check=True,
+    )
+    if not get_image_id(profile):
+        raise RuntimeError("Failed to make agent-image available in the current profile.")
+
+
 def cmd_run(provider_name: str, project_dir: Path) -> None:
     """Start claude/gemini in a containerized colima VM."""
     provider = PROVIDERS.get(provider_name)
@@ -150,13 +189,8 @@ def cmd_run(provider_name: str, project_dir: Path) -> None:
     else:
         print(f"Colima profile '{profile}' already running.")
 
-    # Build image if needed
-    result = run_cmd(docker_cmd(profile, "images", "-q", "agent-image"), capture=True)
-    if not result.stdout.strip():
-        print("Building agent-image...")
-        run_cmd(docker_cmd(profile, "build", "-t", "agent-image", str(SRC_DIR)), check=True)
-    else:
-        print("Image already exists, skipping build.")
+    ensure_shared_image_archive(profile)
+    ensure_profile_image(profile)
 
     print("Starting container...")
     cmd = docker_cmd(
@@ -166,7 +200,7 @@ def cmd_run(provider_name: str, project_dir: Path) -> None:
         "-v", f"{SRC_DIR / 'var' / '.gemini'}:/home/bob/.gemini",
         "-v", f"{SRC_DIR / 'var' / '.claude.json'}:/home/bob/.claude.json",
         "-w", container_dir,
-        "agent-image",
+        IMAGE_NAME,
         *provider.exec_args,
     )
     os.execvp(cmd[0], cmd)
@@ -244,24 +278,18 @@ def cmd_clean(project_dir: Path) -> None:
 
 
 def cmd_clean_image(project_dir: Path) -> None:
-    """Remove the docker image only."""
+    """Remove the shared image archive only."""
     project_dir = project_dir.resolve()
     profile = get_profile_name(project_dir)
 
     print(f"Project:  {project_dir}")
     print(f"Profile:  {profile}")
 
-    if not is_colima_running(profile):
-        print(f"Colima profile '{profile}' is not running.")
-
-    # Check if image exists
-    result = run_cmd(docker_cmd(profile, "images", "-q", "agent-image"), capture=True)
-    if result.stdout.strip():
-        print("Removing agent-image image...")
-        run_cmd(docker_cmd(profile, "rmi", "-f", "agent-image"))
-        print("Image removed.")
+    if SHARED_IMAGE_ARCHIVE.exists():
+        print(f"Removing shared image archive {SHARED_IMAGE_ARCHIVE}...")
+        SHARED_IMAGE_ARCHIVE.unlink()
     else:
-        print("No agent-image image found.")
+        print("No shared image archive found.")
 
 
 def main() -> None:
@@ -302,7 +330,10 @@ def main() -> None:
     p_clean.set_defaults(func=lambda args: cmd_clean(args.project_dir))
 
     # clean-image command
-    p_clean_image = subparsers.add_parser("clean-image", help="Remove the docker image")
+    p_clean_image = subparsers.add_parser(
+        "clean-image",
+        help="Remove the shared image archive",
+    )
     p_clean_image.add_argument("project_dir", nargs="?", type=Path, default=Path.cwd())
     p_clean_image.set_defaults(func=lambda args: cmd_clean_image(args.project_dir))
 
