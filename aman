@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TypedDict
+import hashlib
 
 # Constants
 SRC_DIR = Path(__file__).resolve().parent
@@ -28,13 +29,30 @@ ProfileDB = dict[str, ProfileEntry]  # profile_name -> ProfileEntry
 @dataclass
 class Provider:
     name: str
+    api_key_name: str
+    api_env_var: str
     exec_args: list[str]
 
 
 PROVIDERS = {
-    "claude": Provider("claude", ["claude", "--dangerously-skip-permissions"]),
-    "gemini": Provider("gemini", ["gemini", "--approval-mode=yolo"]),
-    "copilot": Provider("copilot", ["copilot", "--autopilot", "--yolo"]),
+    "claude": Provider(
+        "claude",
+        "anthropic-api-key",
+        "ANTHROPIC_API_KEY",
+        ["claude", "--dangerously-skip-permissions"],
+    ),
+    "gemini": Provider(
+        "gemini",
+        "gemini-api-key",
+        "GEMINI_API_KEY",
+        ["gemini", "--approval-mode=yolo"],
+    ),
+    "copilot": Provider(
+        "copilot",
+        "copilot-api-key",
+        "COPILOT_GITHUB_TOKEN",
+        ["copilot", "--autopilot", "--yolo"],
+    ),
 }
 
 
@@ -65,6 +83,19 @@ def run_cmd(
 def docker_cmd(profile: str, *args: str) -> list[str]:
     """Build docker command with context."""
     return ["docker", "--context", f"colima-{profile}", *args]
+
+
+def get_api_key(key_name: str) -> str:
+    """Get API key from macOS keychain. Returns empty string if not found."""
+    result = run_cmd(
+        ["security", "find-generic-password", "-s", key_name, "-w"],
+        capture=True,
+    )
+    if result.returncode != 0:
+        print(f"Warning: API key '{key_name}' not found in keychain. "
+              f"Starting without it.")
+        return ""
+    return result.stdout.strip()
 
 
 def is_colima_running(profile: str) -> bool:
@@ -162,6 +193,9 @@ def cmd_run(provider_name: str, project_dir: Path) -> None:
     print(f"Project:  {project_dir}")
     print(f"Profile:  {profile}")
 
+    # Get API key (if required)
+    api_key = get_api_key(provider.api_key_name) if provider.api_key_name else ""
+
     # Start Colima profile if not running
     if not is_colima_running(profile):
         print(f"Starting Colima profile '{profile}'...")
@@ -193,12 +227,14 @@ def cmd_run(provider_name: str, project_dir: Path) -> None:
     ensure_profile_image(profile)
 
     print("Starting container...")
+    env_args = ["-e", f"{provider.api_env_var}={api_key}"] if api_key else []
     cmd = docker_cmd(
         profile, "run", "--rm", "-it",
         "-v", f"{project_dir}:{container_dir}",
         "-v", f"{SRC_DIR / 'var' / '.claude'}:/home/bob/.claude",
         "-v", f"{SRC_DIR / 'var' / '.gemini'}:/home/bob/.gemini",
         "-v", f"{SRC_DIR / 'var' / '.claude.json'}:/home/bob/.claude.json",
+        *env_args,
         "-w", container_dir,
         IMAGE_NAME,
         *provider.exec_args,
