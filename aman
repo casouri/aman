@@ -158,41 +158,18 @@ def cmd_run(provider_name: str, project_dir: Path) -> None:
     else:
         print("Image already exists, skipping build.")
 
-    # Check for existing container (running OR stopped)
-    result = run_cmd(
-        docker_cmd(profile, "ps", "-aq", "--filter", "ancestor=agent-image"),
-        capture=True,
+    print("Starting container...")
+    cmd = docker_cmd(
+        profile, "run", "--rm", "-it",
+        "-v", f"{project_dir}:{container_dir}",
+        "-v", f"{SRC_DIR / 'var' / '.claude'}:/home/bob/.claude",
+        "-v", f"{SRC_DIR / 'var' / '.gemini'}:/home/bob/.gemini",
+        "-v", f"{SRC_DIR / 'var' / '.claude.json'}:/home/bob/.claude.json",
+        "-w", container_dir,
+        "agent-image",
+        *provider.exec_args,
     )
-    existing = result.stdout.strip().split("\n")[0] if result.stdout.strip() else ""
-
-    if existing:
-        # Check if container is running
-        result = run_cmd(
-            docker_cmd(profile, "ps", "-q", "--filter", f"id={existing}"),
-            capture=True,
-        )
-        if result.stdout.strip():
-            print("Attaching to running container...")
-        else:
-            print("Starting stopped container...")
-            run_cmd(docker_cmd(profile, "start", existing), check=True)
-
-        # Exec into container (replaces current process)
-        cmd = docker_cmd(profile, "exec", "-it", existing, *provider.exec_args)
-        os.execvp(cmd[0], cmd)
-    else:
-        print("Starting new container...")
-        cmd = docker_cmd(
-            profile, "run", "-it",
-            "-v", f"{project_dir}:{container_dir}",
-            "-v", f"{SRC_DIR / 'var' / '.claude'}:/home/bob/.claude",
-            "-v", f"{SRC_DIR / 'var' / '.gemini'}:/home/bob/.gemini",
-            "-v", f"{SRC_DIR / 'var' / '.claude.json'}:/home/bob/.claude.json",
-            "-w", container_dir,
-            "agent-image",
-            *provider.exec_args,
-        )
-        os.execvp(cmd[0], cmd)
+    os.execvp(cmd[0], cmd)
 
 
 def cmd_stop(project_dir: Path) -> None:

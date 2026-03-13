@@ -15,7 +15,7 @@ A CLI tool to run Claude Code in isolated Docker containers via Colima, one VM p
 ## Files
 
 - `aman` — the CLI script (bash)
-- `Dockerfile` — Docker image definition for Claude Code
+- `Dockerfile` — Docker image definition for the agent CLIs
 - `var/` — shared Claude state directory
   - `.claude.json` — Claude settings (mapped to `~/.claude.json` in container)
   - `.claude/` — Claude data directory (mapped to `~/.claude/` in container)
@@ -44,8 +44,7 @@ Profile naming: `am-<path>` where `<path>` is the absolute project path with `/`
 replaced by `-` and the leading `/` stripped. Example:
 `/Users/yuan/projects/foo` → `am-Users-yuan-projects-foo`
 
-The Docker image (`claude-code`) is built once per Colima profile and reused on
-subsequent runs.
+The Docker image (`agent-image`) is built once reused on all runs. Each run starts a new container.
 
 ## Commands
 ```

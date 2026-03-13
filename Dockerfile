@@ -10,10 +10,10 @@ USER bob
 RUN mkdir -p /home/bob/.npm-global && \
     npm config set prefix '/home/bob/.npm-global' && \
     npm install -g @anthropic-ai/claude-code && \
+    npm install -g @github/copilot && \
     npm install -g @google/gemini-cli
 
 
 
 ENV PATH=/home/bob/.npm-global/bin:$PATH
-
 
